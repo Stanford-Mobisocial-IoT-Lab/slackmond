@@ -1,4 +1,4 @@
-// -*- mode: js; indent-tabs-mode: nil; js-basic-offset: 4 -*-
+    // -*- mode: js; indent-tabs-mode: nil; js-basic-offset: 4 -*-
 //
 // This file is part of slackmond
 //
@@ -73,11 +73,17 @@ class UserContext extends events.EventEmitter {
 
         console.log(`Context ${this._id}: queued Almond input`, message);
         this._incomingMessageQueue.push({ message, activate });
+        console.log(message);
+        console.log(activate);
     }
 
     close() {
         this._closed = true;
-        this._ws.close();
+        if (this._ws !== null) {
+            this._ws.close();
+        } else {
+            console.log("No websocket to close. ");
+        }
     }
 
     _connect() {
@@ -91,7 +97,7 @@ class UserContext extends events.EventEmitter {
 
         try {
             await Tp.Helpers.Http.get(Config.WEB_ALMOND_URL + '/me/api/profile', { auth: auth1 });
-        } catch(e) {
+        } catch (e) {
             if (e.code !== 401)
                 throw e;
 
@@ -112,13 +118,13 @@ class UserContext extends events.EventEmitter {
             });
 
             this._user.access_token = refreshed.access_token;
-            if (refreshed.refresh_token)
-                this._user.refresh_token = refreshed.refresh_token;
+            this._user.refresh_token = refreshed.refresh_token;
         }
     }
 
     async _doConnect() {
         const options = { id: this._id };
+
         if (!this._options.showWelcome)
             options.hide_welcome = '1';
 
@@ -129,13 +135,19 @@ class UserContext extends events.EventEmitter {
         const headers = {
             'Origin': Config.WEB_ALMOND_URL
         };
-        if (this._user.access_token)
-            headers['Authorization'] = `Bearer ${this._user.access_token}`;
+
+        let tempToken = this._user.access_token;
+        headers['Authorization'] = `Bearer ` + tempToken;
 
         this._ws = new WebSocket(url, [], { headers });
+
         this._ws.on('close', () => {
             console.log(`Context ${this._id}: closed`);
-            this._ws = null;
+            if (this._ws !== null) {
+                this._ws = null;
+            } else {
+                console.log('No Websocket.');
+            }
         });
         this._ws.on('error', (e) => {
             console.error(`Error on Web Almond web socket: ${e.message}`);
@@ -147,7 +159,8 @@ class UserContext extends events.EventEmitter {
             // (and discarding it)
             this._pumpingIncomingMessages = false;
         });
-        this._ws.on('message', (data) => {
+        this._ws.on('message', (data) => { //Never gets here
+            console.log("Message received from Almond!");
             const message = JSON.parse(data);
             this._outgoingMessageQueue.push(message);
         });
@@ -160,7 +173,7 @@ class UserContext extends events.EventEmitter {
     async _pumpIncomingMessageQueue() {
         this._pumpingIncomingMessages = true;
         try {
-            for (;;) {
+            for (; ;) {
                 let message = await this._incomingMessageQueue.pop();
                 if (!message.activate &&
                     (this._currentAskSpecial === null || this._currentAskSpecial === 'generic')) {
@@ -170,7 +183,7 @@ class UserContext extends events.EventEmitter {
 
                 this._ws.send(JSON.stringify(message.message));
             }
-        } catch(e) {
+        } catch (e) {
             console.error(`Error on Web Almond web socket: ${e.message}`);
         }
     }
@@ -178,85 +191,85 @@ class UserContext extends events.EventEmitter {
     async _pumpOutgoingMessageQueue() {
         // TODO: consecutive messages (up to ask special) should be collapsed into a single rich
         // slack message
-        for (;;) {
+        for (; ;) {
             let message = await this._outgoingMessageQueue.pop();
             try {
                 switch (message.type) {
-                case 'text':
-                    await this._client.sendMessage(message.text, this._channel);
-                    break;
+                    case 'text':
+                        await this._client.sendMessage(message.text, this._channel);
+                        break;
 
-                case 'picture':
-                    await this._webClient.chat.postMessage({
-                        channel: this._channel,
-                        as_user: true,
-                        text: '',
-                        attachments: [{
-                            fallback: "Almond sends a picture: " + message.url,
-                            image_url: message.url
-                        }]
-                    });
-                    break;
-
-                case 'rdl':
-                    await this._webClient.chat.postMessage({
-                        channel: this._channel,
-                        as_user: true,
-                        text: '',
-                        attachments: [{
-                            fallback: message.rdl.displayTitle,
-                            title: message.rdl.displayTitle,
-                            title_link: message.rdl.webCallback,
-                            text: message.rdl.displayText || '',
-                        }]
-                    });
-                    break;
-
-                case 'choice':
-                    // TODO use buttons rather than text
-                    await this._client.sendMessage("Choice: " + message.text, this._channel);
-                    break;
-
-                case 'button':
-                    await this._client.sendMessage("Button: " + message.title, this._channel);
-                    break;
-
-                case 'link': {
-                    let url = message.url;
-                    if (url === '/apps')
-                        url = Config.WEB_ALMOND_URL + '/me';
-                    else if (url === '/user/register')
-                        url = Config.SERVER_ORIGIN + '/register?' + qs.stringify({ slack_id: this._user.slack_id });
-                    else
-                        url = Config.WEB_ALMOND_URL + url;
-
-                    let text = message.title;
-                    if (message.url === '/user/register')
-                        text = "Log in to Web Almond";
-                    await this._webClient.chat.postMessage({
-                        channel: this._channel,
-                        as_user: true,
-                        text: '',
-                        attachments: [{
-                            fallback: message.title + " at " + message.url,
-                            actions: [{
-                                type: 'button',
-                                text, url
+                    case 'picture':
+                        await this._webClient.chat.postMessage({
+                            channel: this._channel,
+                            as_user: true,
+                            text: '',
+                            attachments: [{
+                                fallback: "Almond sends a picture: " + message.url,
+                                image_url: message.url
                             }]
-                        }]
-                    });
-                    break;
-                }
+                        });
+                        break;
 
-                case 'askSpecial':
-                    console.log(`Context ${this._id}, askSpecial = ${message.ask}`);
-                    this._currentAskSpecial = message.ask;
-                    if (!this._pumpingIncomingMessages)
-                        this._pumpIncomingMessageQueue();
-                    // TODO convert into a button
-                    break;
+                    case 'rdl':
+                        await this._webClient.chat.postMessage({
+                            channel: this._channel,
+                            as_user: true,
+                            text: '',
+                            attachments: [{
+                                fallback: message.rdl.displayTitle,
+                                title: message.rdl.displayTitle,
+                                title_link: message.rdl.webCallback,
+                                text: message.rdl.displayText || '',
+                            }]
+                        });
+                        break;
+
+                    case 'choice':
+                        // TODO use buttons rather than text
+                        await this._client.sendMessage("Choice: " + message.text, this._channel);
+                        break;
+
+                    case 'button':
+                        await this._client.sendMessage("Button: " + message.title, this._channel);
+                        break;
+
+                    case 'link': {
+                        let url = message.url;
+                        if (url === '/apps')
+                            url = Config.WEB_ALMOND_URL + '/me';
+                        else if (url === '/user/register')
+                            url = Config.SERVER_ORIGIN + '/register?' + qs.stringify({ slack_id: this._user.slack_id });
+                        else
+                            url = Config.WEB_ALMOND_URL + url;
+
+                        let text = message.title;
+                        if (message.url === '/user/register')
+                            text = "Log in to Web Almond";
+                        await this._webClient.chat.postMessage({
+                            channel: this._channel,
+                            as_user: true,
+                            text: '',
+                            attachments: [{
+                                fallback: message.title + " at " + message.url,
+                                actions: [{
+                                    type: 'button',
+                                    text, url
+                                }]
+                            }]
+                        });
+                        break;
+                    }
+
+                    case 'askSpecial':
+                        console.log(`Context ${this._id}, askSpecial = ${message.ask}`);
+                        this._currentAskSpecial = message.ask;
+                        if (!this._pumpingIncomingMessages)
+                            this._pumpIncomingMessageQueue();
+                        // TODO convert into a button
+                        break;
                 }
-            } catch(e) {
+            } catch (e) {
                 console.error(`Failed to send message to Slack: ${e.message}`);
             }
         }
